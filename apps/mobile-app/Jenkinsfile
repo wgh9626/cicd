@@ -1,0 +1,85 @@
+def cfg
+
+pipeline {
+    agent none
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+    }
+
+    stages {
+        stage('Load Config') {
+            agent any
+            steps {
+                checkout scm
+                script {
+                    cfg = readYaml file: 'apps/mobile-app/ci/release-config.yaml'
+                    def shortSha = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    def branchSafe = env.BRANCH_NAME ? env.BRANCH_NAME.replaceAll('/', '-') : 'main'
+                    env.BUILD_TAG = "${branchSafe}-${shortSha}"
+                }
+            }
+        }
+
+        stage('Build Mobile') {
+            agent {
+                kubernetes {
+                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins-agent: ${cfg.service_name}
+spec:
+  serviceAccountName: jenkins
+  restartPolicy: Never
+  containers:
+    - name: builder
+      image: ${cfg.builder_image}
+      command: ['cat']
+      tty: true
+      workingDir: /home/jenkins/agent
+"""
+                }
+            }
+
+            stages {
+                stage('Checkout Source') {
+                    steps {
+                        checkout scm
+                    }
+                }
+
+                stage('Build APK') {
+                    steps {
+                        container('builder') {
+                            sh """
+                              cd \"${cfg.app_path}\"
+                              flutter pub get
+                              flutter test
+                              flutter build apk --release
+                            """
+                        }
+                    }
+                }
+
+                stage('Archive Artifact') {
+                    steps {
+                        archiveArtifacts artifacts: "${cfg.artifact_path}", fingerprint: true
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "build success: ${cfg?.service_name ?: 'mobile-app'} ${env.BUILD_TAG ?: ''}"
+        }
+        failure {
+            echo 'build failed'
+        }
+    }
+}

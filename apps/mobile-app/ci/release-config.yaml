@@ -1,0 +1,4 @@
+service_name: mobile-app
+builder_image: acr-dh-registry.eu-central-1.cr.aliyuncs.com/agent/ci-mobile-builder:flutter3.22-android
+app_path: apps/mobile-app
+artifact_path: apps/mobile-app/build/app/outputs/flutter-apk/*.apk

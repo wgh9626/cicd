@@ -1,0 +1,16 @@
+service_name: admin-web
+builder_image: acr-dh-registry.eu-central-1.cr.aliyuncs.com/agent/ci-web-builder:node20-pnpm9
+app_path: apps/admin-web
+dockerfile_path: apps/admin-web/Dockerfile
+image_repo: acr-dh-registry.eu-central-1.cr.aliyuncs.com/agent/admin-web
+
+gitops_repo: git@github.com:wgh9626/cicd.git
+gitops_branch: main
+gitops_manifest: gitops/test/admin-web/deployment.yaml
+
+namespace: test
+deployment_name: admin-web
+container_name: admin-web
+
+harbor_credentials_id: 4e8855e7-f023-41a8-9298-81c1a267b691
+gitops_git_credentials_id: 0db4ebbb-6e1d-4980-b4c7-3ed2d22ca7af

@@ -1,0 +1,196 @@
+def cfg
+
+def buildJavaPodYaml(cfg) {
+    return """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins-agent: ${cfg.service_name}
+spec:
+  serviceAccountName: jenkins
+  restartPolicy: Never
+  containers:
+    - name: builder
+      image: ${cfg.builder_image}
+      command: ['cat']
+      tty: true
+      workingDir: /home/jenkins/agent
+
+    - name: image
+      image: gcr.io/kaniko-project/executor:latest
+      command: ['/busybox/cat']
+      tty: true
+      workingDir: /home/jenkins/agent
+
+    - name: ops
+      image: acr-dh-registry.eu-central-1.cr.aliyuncs.com/agent/ci-ops:kubectl-git-yq
+      command: ['cat']
+      tty: true
+      workingDir: /home/jenkins/agent
+"""
+}
+
+pipeline {
+    agent none
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+    }
+
+    parameters {
+        string(name: 'GIT_REF', defaultValue: 'main', description: 'Git branch/tag/commit')
+    }
+
+    stages {
+        stage('Load Config') {
+            agent any
+            steps {
+                checkout scm
+                sh "git checkout \"${params.GIT_REF}\""
+                script {
+                    cfg = readYaml file: 'apps/java-service/ci/release-config.yaml'
+                    def shortSha = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    def strategy = cfg.image_tag_strategy ?: 'git-build-number'
+                    if (strategy == 'git-sha') {
+                        env.IMAGE_TAG = "git-${shortSha}"
+                    } else if (strategy == 'git-build-number') {
+                        env.IMAGE_TAG = "git-${shortSha}-${env.BUILD_NUMBER}"
+                    } else {
+                        env.IMAGE_TAG = "build-${env.BUILD_NUMBER}"
+                    }
+                }
+                sh '''
+                  test -n "${WORKSPACE}"
+                  test -n "${IMAGE_TAG}"
+                '''
+            }
+        }
+
+        stage('Release') {
+            agent {
+                kubernetes {
+                    yaml buildJavaPodYaml(cfg)
+                }
+            }
+
+            stages {
+                stage('Checkout Source') {
+                    steps {
+                        checkout scm
+                    }
+                }
+
+                stage('Validate Config') {
+                    steps {
+                        sh """
+                          test -n \"${cfg.service_name}\"
+                          test -n \"${cfg.app_path}\"
+                          test -n \"${cfg.dockerfile_path}\"
+                          test -n \"${cfg.image_repo}\"
+                          test -n \"${cfg.gitops_repo}\"
+                          test -n \"${cfg.gitops_manifest}\"
+                          test -n \"${cfg.namespace}\"
+                          test -n \"${cfg.deployment_name}\"
+                          test -f \"${cfg.app_path}/pom.xml\"
+                          test -f \"${cfg.dockerfile_path}\"
+                          test -f \"${WORKSPACE}/${cfg.gitops_manifest}\"
+                        """
+                    }
+                }
+
+                stage('Build') {
+                    steps {
+                        container('builder') {
+                            sh """
+                              mvn -f \"${cfg.app_path}/pom.xml\" clean package -DskipTests
+                            """
+                        }
+                    }
+                }
+
+                stage('Kaniko Build & Push') {
+                    steps {
+                        container('image') {
+                            withCredentials([usernamePassword(
+                                credentialsId: cfg.harbor_credentials_id,
+                                usernameVariable: 'HARBOR_USER',
+                                passwordVariable: 'HARBOR_PASS'
+                            )]) {
+                                sh """
+                                  mkdir -p /kaniko/.docker
+                                  AUTH=\$(printf "%s:%s" "\$HARBOR_USER" "\$HARBOR_PASS" | base64 | tr -d '\\n')
+                                  cat > /kaniko/.docker/config.json <<EOF_JSON
+{
+  "auths": {
+    "acr-dh-registry.eu-central-1.cr.aliyuncs.com": {
+      "auth": "\$AUTH"
+    }
+  }
+}
+EOF_JSON
+
+                                  /kaniko/executor \
+                                    --context \"${WORKSPACE}/${cfg.app_path}\" \
+                                    --dockerfile \"${WORKSPACE}/${cfg.dockerfile_path}\" \
+                                    --destination \"${cfg.image_repo}:${IMAGE_TAG}\"
+                                """
+                            }
+                        }
+                    }
+                }
+
+                stage('Update GitOps Repo') {
+                    steps {
+                        container('ops') {
+                            withCredentials([usernamePassword(
+                                credentialsId: cfg.gitops_git_credentials_id,
+                                usernameVariable: 'GIT_USER',
+                                passwordVariable: 'GIT_PASS'
+                            )]) {
+                                sh """
+                                  rm -rf gitops-repo
+
+                                  GITOPS_URL=\"${cfg.gitops_repo}\"
+                                  if echo \"${cfg.gitops_repo}\" | grep -q '^https://'; then
+                                    GITOPS_URL=\$(echo \"${cfg.gitops_repo}\" | sed \"s#https://#https://\${GIT_USER}:\${GIT_PASS}@#\")
+                                  fi
+
+                                  git clone -b \"${cfg.gitops_branch}\" \"\${GITOPS_URL}\" gitops-repo
+                                  cd gitops-repo
+
+                                  git config user.name "jenkins"
+                                  git config user.email "jenkins@example.local"
+
+                                  bash "${WORKSPACE}/infra/ci/scripts/update-image.sh" \"${cfg.gitops_manifest}\" \"${cfg.image_repo}:${IMAGE_TAG}\" \"${cfg.container_name}\"
+                                  bash "${WORKSPACE}/infra/ci/scripts/git-commit-push.sh" \"${cfg.gitops_manifest}\" \"release(${cfg.service_name}): update image to ${IMAGE_TAG}\"
+                                """
+                            }
+                        }
+                    }
+                }
+
+                stage('Verify Deploy') {
+                    steps {
+                        container('ops') {
+                            sh """
+                              bash "${WORKSPACE}/infra/ci/scripts/verify-rollout.sh" \"${cfg.namespace}\" \"${cfg.deployment_name}\"
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "release success: ${cfg?.image_repo ?: ''}:${env.IMAGE_TAG ?: ''}"
+        }
+        failure {
+            echo 'release failed'
+        }
+    }
+}
