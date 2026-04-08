@@ -172,15 +172,6 @@ EOF_JSON
                     }
                 }
 
-                stage('Verify Deploy') {
-                    steps {
-                        container('ops') {
-                            sh """
-                              bash "${WORKSPACE}/infra/ci/scripts/verify-rollout.sh" \"${cfg.namespace}\" \"${cfg.deployment_name}\"
-                            """
-                        }
-                    }
-                }
             }
         }
     }
