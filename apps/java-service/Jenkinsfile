@@ -18,7 +18,7 @@ spec:
       workingDir: /home/jenkins/agent
 
     - name: image
-      image: gcr.io/kaniko-project/executor:latest
+      image: acr-dh-registry.eu-central-1.cr.aliyuncs.com/agent/kaniko:v1.27.1-debug
       command: ['/busybox/cat']
       tty: true
       workingDir: /home/jenkins/agent
