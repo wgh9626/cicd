@@ -5,7 +5,7 @@ dockerfile_path: apps/admin-web/Dockerfile
 image_repo: acr-dh-registry.eu-central-1.cr.aliyuncs.com/agent/admin-web
 
 gitops_repo: https://github.com/wgh9626/cicd.git
-gitops_branch: main
+gitops_branch: master
 gitops_manifest: gitops/test/admin-web/deployment.yaml
 
 namespace: test

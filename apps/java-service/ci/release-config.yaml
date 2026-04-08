@@ -5,7 +5,7 @@ dockerfile_path: apps/java-service/Dockerfile
 image_repo: acr-dh-registry.eu-central-1.cr.aliyuncs.com/agent/java-service
 
 gitops_repo: https://github.com/wgh9626/cicd.git
-gitops_branch: main
+gitops_branch: master
 gitops_manifest: gitops/test/java-service/deployment.yaml
 
 namespace: test
