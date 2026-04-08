@@ -4,7 +4,7 @@ app_path: apps/go-service
 dockerfile_path: apps/go-service/Dockerfile
 image_repo: acr-dh-registry.eu-central-1.cr.aliyuncs.com/agent/go-service
 
-gitops_repo: git@github.com:wgh9626/cicd.git
+gitops_repo: https://github.com/wgh9626/cicd.git
 gitops_branch: main
 gitops_manifest: gitops/test/go-service/deployment.yaml
 
